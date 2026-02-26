@@ -3,7 +3,7 @@ requires = ["setuptools>=68.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "mac-onenote-export"
+name = "markdown-onenote-export"
 version = "0.1.0"
 description = "Export Microsoft OneNote (.one) files to Markdown"
 requires-python = ">=3.11"

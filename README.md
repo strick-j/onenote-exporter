@@ -1,8 +1,8 @@
-# mac-onenote-export
+# markdown-onenote-export
 
-[![GitHub Release](https://img.shields.io/github/v/release/strick-j/mac-onenote-export)](https://github.com/strick-j/mac-onenote-export/releases)
-[![Tests](https://github.com/strick-j/mac-onenote-export/actions/workflows/test.yml/badge.svg)](https://github.com/strick-j/mac-onenote-export/actions/workflows/test.yml)
-[![Security](https://github.com/strick-j/mac-onenote-export/actions/workflows/security.yml/badge.svg)](https://github.com/strick-j/mac-onenote-export/actions/workflows/security.yml)
+[![GitHub Release](https://img.shields.io/github/v/release/strick-j/markdown-onenote-export)](https://github.com/strick-j/markdown-onenote-export/releases)
+[![Tests](https://github.com/strick-j/markdown-onenote-export/actions/workflows/test.yml/badge.svg)](https://github.com/strick-j/markdown-onenote-export/actions/workflows/test.yml)
+[![Security](https://github.com/strick-j/markdown-onenote-export/actions/workflows/security.yml/badge.svg)](https://github.com/strick-j/markdown-onenote-export/actions/workflows/security.yml)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org/downloads/)
 
 A command-line tool that exports Microsoft OneNote `.one` files to Markdown.
@@ -26,8 +26,8 @@ OneNote stores notebooks in a proprietary binary format (MS-ONESTORE). This tool
 ## Installation
 
 ```bash
-git clone https://github.com/strick-j/mac-onenote-export.git
-cd mac-onenote-export
+git clone https://github.com/strick-j/markdown-onenote-export.git
+cd markdown-onenote-export
 
 # Create and activate a virtual environment (recommended)
 python3 -m venv .venv

@@ -28,7 +28,7 @@ jobs:
       - name: Install dependencies
         run: |
           pip install ".[dev]"
-          pip freeze --exclude mac-onenote-export > requirements-audit.txt
+          pip freeze --exclude markdown-onenote-export > requirements-audit.txt
 
       - name: Install pip-audit
         run: pip install pip-audit
