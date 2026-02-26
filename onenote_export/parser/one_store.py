@@ -12,22 +12,40 @@ from pathlib import Path
 
 from pyOneNote.Header import Header
 from pyOneNote.OneDocument import OneDocment
-from pyOneNote.FileNode import PropertyID, PropertySet
+from pyOneNote.FileNode import PropertyID, PropertySet, ObjectSpaceObjectPropSet
 
 logger = logging.getLogger(__name__)
 
 
-def _patch_pyonenote_array_of_property_values() -> None:
-    """Monkey-patch pyOneNote to support ArrayOfPropertyValues (type 0x10).
+def _patch_pyonenote() -> None:
+    """Monkey-patch pyOneNote to fix bugs and add missing features.
 
-    The upstream pyOneNote library raises NotImplementedError for property
-    type 0x10 (prtArrayOfPropertyValues).  Per the MS-ONESTORE spec
-    (section 2.6.9), the format is:
+    Fixes applied:
+    1. ``ObjectSpaceObjectStreamOfIDs.read()`` never increments its
+       ``head`` pointer, so all OSID references within the same
+       PropertySet resolve to the first entry.  This breaks properties
+       like ``ListNodes`` when multiple OSIDs are present.
 
-        cProperties : uint32  — number of child PropertySets
-        prid        : PropertyID (4 bytes) — only if cProperties > 0
-        Data        : cProperties consecutive PropertySet structures
+    2. ``PropertySet.__init__`` raises ``NotImplementedError`` for
+       property type 0x10 (prtArrayOfPropertyValues).  Per the
+       MS-ONESTORE spec (section 2.6.9), the format is:
+
+           cProperties : uint32  — number of child PropertySets
+           prid        : PropertyID (4 bytes) — only if cProperties > 0
+           Data        : cProperties consecutive PropertySet structures
     """
+    from pyOneNote.FileNode import ObjectSpaceObjectStreamOfIDs
+
+    _original_read = ObjectSpaceObjectStreamOfIDs.read
+
+    def _patched_read(self):
+        res = None
+        if self.head < len(self.body):
+            res = self.body[self.head]
+            self.head += 1
+        return res
+
+    ObjectSpaceObjectStreamOfIDs.read = _patched_read
     _original_init = PropertySet.__init__
 
     def _patched_init(self, file, OIDs=None, OSIDs=None,
@@ -110,8 +128,8 @@ def _patch_pyonenote_array_of_property_values() -> None:
     PropertySet.__init__ = _patched_init
 
 
-# Apply the patch at import time
-_patch_pyonenote_array_of_property_values()
+# Apply patches at import time
+_patch_pyonenote()
 
 # JCID type names from the OneNote spec
 _PAGE_META = "jcidPageMetaData"
@@ -167,6 +185,7 @@ class ExtractedSection:
     display_name: str = ""
     pages: list[ExtractedPage] = field(default_factory=list)
     file_data: dict[str, bytes] = field(default_factory=dict)
+    paragraph_styles: dict[str, str] = field(default_factory=dict)
 
 
 class OneStoreParser:
@@ -196,6 +215,9 @@ class OneStoreParser:
             if content:
                 section.file_data[guid] = content
 
+        # Extract paragraph styles from ReadOnly object declarations
+        section.paragraph_styles = self._extract_paragraph_styles(doc)
+
         # Convert raw properties to ExtractedObjects
         all_objects = []
         for raw in raw_props:
@@ -211,6 +233,55 @@ class OneStoreParser:
         section.display_name = self._extract_section_name(all_objects)
 
         return section
+
+    def _extract_paragraph_styles(
+        self, doc: OneDocment,
+    ) -> dict[str, str]:
+        """Extract paragraph style IDs from ReadOnly object declarations.
+
+        pyOneNote traverses ``ObjectDeclaration2RefCountFND`` nodes but
+        skips ``ReadOnlyObjectDeclaration2RefCountFND`` nodes which
+        contain the ``jcidParagraphStyleObjectForText`` property sets.
+
+        This method finds those ReadOnly nodes, seeks to their data in
+        the file, parses the PropertySet, and builds a mapping from the
+        object's identity string to its ``ParagraphStyleId`` value.
+        """
+        all_nodes: list[object] = []
+        OneDocment.traverse_nodes(doc.root_file_node_list, all_nodes, [])
+
+        styles: dict[str, str] = {}
+        for node in all_nodes:
+            data = getattr(node, "data", None)
+            if data is None:
+                continue
+            if type(data).__name__ != "ReadOnlyObjectDeclaration2RefCountFND":
+                continue
+
+            base = data.base
+            ref_stp = base.ref.stp
+            ref_cb = base.ref.cb
+            if ref_stp == 0 or ref_cb == 0:
+                continue
+
+            try:
+                with open(self.file_path, "rb") as f:
+                    f.seek(ref_stp)
+                    prop_set = ObjectSpaceObjectPropSet(f, doc)
+                    props = dict(prop_set.body.get_properties())
+            except Exception:
+                continue
+
+            style_id = props.get("ParagraphStyleId", "")
+            if not style_id:
+                continue
+
+            oid = str(base.body.oid)
+            # Clean the null terminator from the style ID
+            clean_id = style_id.replace("\x00", "").strip()
+            styles[oid] = clean_id
+
+        return styles
 
     def _extract_section_name(self, objects: list[ExtractedObject]) -> str:
         """Extract section display name from section metadata."""

@@ -31,6 +31,8 @@ class RichText(ContentElement):
     indent_level: int = 0
     is_title: bool = False
     alignment: str = ""  # "left", "center", "right"
+    heading_level: int = 0  # 1-6 for headings, 0 for normal text
+    list_type: str = ""  # "ordered", "unordered", "" for non-list
 
 
 @dataclass

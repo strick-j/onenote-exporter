@@ -121,34 +121,42 @@ class MarkdownConverter:
             if not text:
                 continue
 
-            # Apply formatting
-            if run.strikethrough:
-                text = f"~~{text}~~"
-            if run.bold and run.italic:
-                text = f"***{text}***"
-            elif run.bold:
-                text = f"**{text}**"
-            elif run.italic:
-                text = f"*{text}*"
-            if run.underline and not run.hyperlink_url:
-                # Markdown doesn't have native underline; use emphasis
-                text = f"*{text}*"
+            # Apply formatting (skip inline formatting for headings)
+            if not rt.heading_level:
+                if run.strikethrough:
+                    text = f"~~{text}~~"
+                if run.bold and run.italic:
+                    text = f"***{text}***"
+                elif run.bold:
+                    text = f"**{text}**"
+                elif run.italic:
+                    text = f"*{text}*"
+                if run.underline and not run.hyperlink_url:
+                    text = f"*{text}*"
 
             if run.hyperlink_url:
                 text = f"[{run.text}]({run.hyperlink_url})"
 
-            if run.superscript:
-                text = f"<sup>{text}</sup>"
-            if run.subscript:
-                text = f"<sub>{text}</sub>"
+            if not rt.heading_level:
+                if run.superscript:
+                    text = f"<sup>{text}</sup>"
+                if run.subscript:
+                    text = f"<sub>{text}</sub>"
 
             parts.append(text)
 
         result = "".join(parts)
 
-        # Apply indent level as list items
-        if rt.indent_level > 0:
-            indent = "  " * (rt.indent_level - 1)
+        # Apply heading prefix
+        if rt.heading_level:
+            prefix = "#" * rt.heading_level
+            result = f"{prefix} {result}"
+        elif rt.list_type:
+            indent = "   " * rt.indent_level
+            marker = "1." if rt.list_type == "ordered" else "-"
+            result = f"{indent}{marker} {result}"
+        elif rt.indent_level > 0:
+            indent = "   " * rt.indent_level
             result = f"{indent}- {result}"
 
         return result
