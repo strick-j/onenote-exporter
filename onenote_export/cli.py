@@ -8,7 +8,6 @@ from pathlib import Path
 
 from onenote_export.converter.markdown import MarkdownConverter
 from onenote_export.model.notebook import Notebook
-from onenote_export.model.section import Section
 from onenote_export.parser.content_extractor import extract_section
 from onenote_export.parser.one_store import OneStoreParser
 from onenote_export.utils import (
@@ -25,17 +24,20 @@ def main(argv: list[str] | None = None) -> int:
         description="Export OneNote (.one) files to Markdown",
     )
     parser.add_argument(
-        "-i", "--input",
+        "-i",
+        "--input",
         required=True,
         help="Input directory containing .one files",
     )
     parser.add_argument(
-        "-o", "--output",
+        "-o",
+        "--output",
         required=True,
         help="Output directory for Markdown files",
     )
     parser.add_argument(
-        "-v", "--verbose",
+        "-v",
+        "--verbose",
         action="store_true",
         help="Enable verbose logging",
     )
@@ -90,9 +92,7 @@ def main(argv: list[str] | None = None) -> int:
     # Files like "ADI (On 2-25-26).one" and "ADI.one (On 10-3-22).one"
     # are the same section at different dates
     for notebook_dir in notebooks:
-        notebooks[notebook_dir] = _deduplicate_sections(
-            notebooks[notebook_dir]
-        )
+        notebooks[notebook_dir] = _deduplicate_sections(notebooks[notebook_dir])
 
     # Process each notebook
     converter = MarkdownConverter(output_dir)
@@ -150,7 +150,7 @@ def main(argv: list[str] | None = None) -> int:
 
     # Summary
     print(f"\n{'=' * 50}")
-    print(f"Export complete:")
+    print("Export complete:")
     print(f"  Pages extracted: {total_pages}")
     print(f"  Files written:   {total_files}")
     print(f"  Output:          {output_dir}")
@@ -181,7 +181,11 @@ def _deduplicate_sections(files: list[Path]) -> list[Path]:
         section_name = section_name_from_filename(f.name)
         match = date_pattern.search(f.name)
         if match:
-            month, day, year = int(match.group(1)), int(match.group(2)), int(match.group(3))
+            month, day, year = (
+                int(match.group(1)),
+                int(match.group(2)),
+                int(match.group(3)),
+            )
             # Normalize 2-digit year
             if year < 100:
                 year += 2000 if year < 50 else 1900
@@ -189,9 +193,7 @@ def _deduplicate_sections(files: list[Path]) -> list[Path]:
                 (f, (year, month, day))
             )
         else:
-            section_versions.setdefault(section_name, []).append(
-                (f, (0, 0, 0))
-            )
+            section_versions.setdefault(section_name, []).append((f, (0, 0, 0)))
 
     result: list[Path] = []
     for section_name, versions in sorted(section_versions.items()):
@@ -203,7 +205,9 @@ def _deduplicate_sections(files: list[Path]) -> list[Path]:
             skipped = [v[0].name for v in versions[1:]]
             logging.info(
                 "Section '%s': using %s, skipping older: %s",
-                section_name, latest.name, ", ".join(skipped),
+                section_name,
+                latest.name,
+                ", ".join(skipped),
             )
 
     return result

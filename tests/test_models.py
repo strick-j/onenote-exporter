@@ -1,7 +1,6 @@
 """Tests for onenote_export.model module."""
 
 from onenote_export.model.content import (
-    ContentElement,
     EmbeddedFile,
     ImageElement,
     RichText,

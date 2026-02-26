@@ -8,6 +8,7 @@ from onenote_export.model.content import ContentElement
 @dataclass
 class Page:
     """A single page in a OneNote section."""
+
     title: str = ""
     level: int = 0
     creation_time: int = 0

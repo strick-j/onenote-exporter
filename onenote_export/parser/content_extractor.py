@@ -42,7 +42,12 @@ _STYLE_CONTAINER = "jcidPersistablePropertyContainerForTOCSection"
 
 # ParagraphStyleId → heading level mapping
 _HEADING_STYLE_MAP: dict[str, int] = {
-    "h1": 1, "h2": 2, "h3": 3, "h4": 4, "h5": 5, "h6": 6,
+    "h1": 1,
+    "h2": 2,
+    "h3": 3,
+    "h4": 4,
+    "h5": 5,
+    "h6": 6,
 }
 
 
@@ -71,7 +76,8 @@ def _deduplicate_objects(
     # Find the repeat pattern: look for the first content fingerprint
     # appearing again later in the sequence
     content_fps = [
-        (i, fp) for i, fp in enumerate(fingerprints)
+        (i, fp)
+        for i, fp in enumerate(fingerprints)
         if fp and objects[i].obj_type in (_RICH_TEXT, _IMAGE_NODE, _EMBEDDED_FILE)
     ]
 
@@ -147,7 +153,9 @@ def extract_section(parsed: ExtractedSection) -> Section:
 
     for extracted_page in parsed.pages:
         page = _build_page(
-            extracted_page, parsed.file_data, parsed.paragraph_styles,
+            extracted_page,
+            parsed.file_data,
+            parsed.paragraph_styles,
         )
         section.pages.append(page)
 
@@ -188,7 +196,9 @@ def _find_out_of_line_table_refs(objects: list[ExtractedObject]) -> set[int]:
         while j < len(objects):
             inner = objects[j]
             if inner.obj_type in (
-                _TABLE_CELL_TYPE, "jcidTableRowNode", "jcidTableNode",
+                _TABLE_CELL_TYPE,
+                "jcidTableRowNode",
+                "jcidTableNode",
             ):
                 break
             inline_ranges.add(j)
@@ -206,8 +216,10 @@ def _find_out_of_line_table_refs(objects: list[ExtractedObject]) -> set[int]:
         while j < len(objects):
             robj = objects[j]
             if robj.obj_type in (
-                "jcidOutlineElementNode", "jcidRichTextOENode",
-                "jcidImageNode", "jcidEmbeddedFileNode",
+                "jcidOutlineElementNode",
+                "jcidRichTextOENode",
+                "jcidImageNode",
+                "jcidEmbeddedFileNode",
             ):
                 out_of_line.add(j)
                 j += 1
@@ -220,6 +232,7 @@ def _find_out_of_line_table_refs(objects: list[ExtractedObject]) -> set[int]:
 @dataclass(frozen=True)
 class _ListInfo:
     """Resolved list information for a single list item."""
+
     list_type: str  # "ordered" or "unordered"
     indent_level: int  # 0-based nesting depth
 
@@ -293,7 +306,9 @@ def _resolve_list_info(
     ref = str(list_refs[0])
     node_props = list_node_map.get(ref)
     if not node_props:
-        logger.debug("ListNodes ref %r not found in list_node_map; defaulting to unordered", ref)
+        logger.debug(
+            "ListNodes ref %r not found in list_node_map; defaulting to unordered", ref
+        )
         return _ListInfo(list_type="unordered", indent_level=0)
 
     # Determine bullet vs numbered from NumberListFormat
@@ -375,7 +390,9 @@ def _build_page(
 
         if obj.obj_type == _OUTLINE_ELEMENT:
             resolved = _resolve_list_info(
-                obj, list_node_map, top_level_oe_ids,
+                obj,
+                list_node_map,
+                top_level_oe_ids,
             )
             if resolved is not None:
                 # OE has its own list marker — always use it.
@@ -392,7 +409,10 @@ def _build_page(
 
         if obj.obj_type == _RICH_TEXT:
             element = _extract_rich_text(
-                obj, current_style, list_info, paragraph_styles,
+                obj,
+                current_style,
+                list_info,
+                paragraph_styles,
             )
             if element:
                 page.elements.append(element)
@@ -412,7 +432,11 @@ def _build_page(
 
         if obj.obj_type == _TABLE_NODE:
             element, consumed, _out_of_line = _extract_table(
-                obj, deduped_objects, i, current_style, file_data,
+                obj,
+                deduped_objects,
+                i,
+                current_style,
+                file_data,
             )
             if element:
                 page.elements.append(element)
@@ -671,9 +695,7 @@ def _extract_table(
             child_refs = cell_obj.properties.get(
                 "ElementChildNodesOfVersionHistory", []
             )
-            max_outlines = (
-                len(child_refs) if isinstance(child_refs, list) else 1
-            )
+            max_outlines = len(child_refs) if isinstance(child_refs, list) else 1
 
             # --- Inline content (objects immediately after the cell) ---
             cell_elements: list[ContentElement] = []
@@ -794,9 +816,13 @@ def _decode_text_value(value: object, encoding: str = "unicode") -> str:
             try:
                 raw = bytes.fromhex(cleaned)
                 if encoding == "ascii":
-                    return _clean_text(raw.decode("ascii", errors="replace").rstrip("\x00"))
+                    return _clean_text(
+                        raw.decode("ascii", errors="replace").rstrip("\x00")
+                    )
                 else:
-                    return _clean_text(raw.decode("utf-16-le", errors="replace").rstrip("\x00"))
+                    return _clean_text(
+                        raw.decode("utf-16-le", errors="replace").rstrip("\x00")
+                    )
             except (ValueError, UnicodeDecodeError):
                 pass
 

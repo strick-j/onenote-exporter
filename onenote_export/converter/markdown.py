@@ -14,7 +14,6 @@ from onenote_export.model.content import (
     ImageElement,
     RichText,
     TableElement,
-    TextRun,
 )
 from onenote_export.model.notebook import Notebook
 from onenote_export.model.page import Page
@@ -88,8 +87,6 @@ class MarkdownConverter:
         # Render each content element, tracking ordered list counters
         # per indent level so numbered lists increment correctly.
         ordered_counters: dict[int, int] = {}
-        prev_list_type = ""
-        prev_indent = -1
 
         for element in page.elements:
             if isinstance(element, RichText) and element.list_type == "ordered":
@@ -104,15 +101,12 @@ class MarkdownConverter:
                         del ordered_counters[k]
                 ordered_counters[level] += 1
                 md = self._render_rich_text(
-                    element, ordered_number=ordered_counters[level],
+                    element,
+                    ordered_number=ordered_counters[level],
                 )
-                prev_list_type = "ordered"
-                prev_indent = level
             else:
                 if not (isinstance(element, RichText) and element.list_type):
                     ordered_counters.clear()
-                    prev_list_type = ""
-                    prev_indent = -1
                 md = self._render_element(element)
 
             if md:
@@ -140,7 +134,9 @@ class MarkdownConverter:
         return ""
 
     def _render_rich_text(
-        self, rt: RichText, ordered_number: int = 0,
+        self,
+        rt: RichText,
+        ordered_number: int = 0,
     ) -> str:
         """Render rich text to Markdown."""
         parts: list[str] = []
@@ -227,9 +223,7 @@ class MarkdownConverter:
 
             # Add header separator after first row
             if i == 0:
-                lines.append(
-                    "| " + " | ".join("---" for _ in cells) + " |"
-                )
+                lines.append("| " + " | ".join("---" for _ in cells) + " |")
 
         return "\n".join(lines)
 
@@ -262,9 +256,7 @@ class MarkdownConverter:
 
         return created
 
-    def _write_embedded_files(
-        self, page: Page, section_dir: Path
-    ) -> list[Path]:
+    def _write_embedded_files(self, page: Page, section_dir: Path) -> list[Path]:
         """Write embedded file data to files."""
         created: list[Path] = []
         attachments_dir = section_dir / "attachments"
@@ -272,9 +264,7 @@ class MarkdownConverter:
         for element in page.elements:
             if isinstance(element, EmbeddedFile) and element.data:
                 attachments_dir.mkdir(exist_ok=True)
-                filename = _sanitize_filename(
-                    element.filename or "attachment"
-                )
+                filename = _sanitize_filename(element.filename or "attachment")
                 file_path = attachments_dir / filename
                 file_path.write_bytes(element.data)
                 created.append(file_path)

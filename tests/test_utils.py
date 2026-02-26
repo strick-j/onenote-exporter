@@ -1,9 +1,7 @@
 """Tests for onenote_export.utils module."""
 
-import tempfile
 from pathlib import Path
 
-import pytest
 
 from onenote_export.utils import (
     discover_one_files,
@@ -28,7 +26,10 @@ class TestSectionNameFromFilename:
         assert section_name_from_filename("Meeting Notes.one") == "Meeting Notes"
 
     def test_filename_with_spaces_and_date(self):
-        assert section_name_from_filename("Meeting Notes (On 10-3-22).one") == "Meeting Notes"
+        assert (
+            section_name_from_filename("Meeting Notes (On 10-3-22).one")
+            == "Meeting Notes"
+        )
 
     def test_empty_filename_returns_untitled(self):
         assert section_name_from_filename(".one") == "Untitled"

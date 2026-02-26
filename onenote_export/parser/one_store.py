@@ -48,12 +48,13 @@ def _patch_pyonenote() -> None:
     ObjectSpaceObjectStreamOfIDs.read = _patched_read
     _original_init = PropertySet.__init__
 
-    def _patched_init(self, file, OIDs=None, OSIDs=None,
-                      ContextIDs=None, document=None):
+    def _patched_init(
+        self, file, OIDs=None, OSIDs=None, ContextIDs=None, document=None
+    ):
         self.current = file.tell()
-        self.cProperties, = struct.unpack('<H', file.read(2))
+        (self.cProperties,) = struct.unpack("<H", file.read(2))
         self.rgPrids = []
-        self.indent = ''
+        self.indent = ""
         self.document = document
         self.current_revision = document.cur_revision if document else None
         self._formated_properties = None
@@ -69,42 +70,35 @@ def _patch_pyonenote() -> None:
             elif ptype == 0x2:
                 self.rgData.append(self.rgPrids[i].boolValue)
             elif ptype == 0x3:
-                self.rgData.append(struct.unpack('c', file.read(1))[0])
+                self.rgData.append(struct.unpack("c", file.read(1))[0])
             elif ptype == 0x4:
-                self.rgData.append(struct.unpack('2s', file.read(2))[0])
+                self.rgData.append(struct.unpack("2s", file.read(2))[0])
             elif ptype == 0x5:
-                self.rgData.append(struct.unpack('4s', file.read(4))[0])
+                self.rgData.append(struct.unpack("4s", file.read(4))[0])
             elif ptype == 0x6:
-                self.rgData.append(struct.unpack('8s', file.read(8))[0])
+                self.rgData.append(struct.unpack("8s", file.read(8))[0])
             elif ptype == 0x7:
                 from pyOneNote.FileNode import PrtFourBytesOfLengthFollowedByData
-                self.rgData.append(
-                    PrtFourBytesOfLengthFollowedByData(file, self)
-                )
+
+                self.rgData.append(PrtFourBytesOfLengthFollowedByData(file, self))
             elif ptype in (0x8, 0x9):
                 count = 1
                 if ptype == 0x9:
-                    count, = struct.unpack('<I', file.read(4))
-                self.rgData.append(
-                    PropertySet.get_compact_ids(OIDs, count)
-                )
+                    (count,) = struct.unpack("<I", file.read(4))
+                self.rgData.append(PropertySet.get_compact_ids(OIDs, count))
             elif ptype in (0xA, 0xB):
                 count = 1
                 if ptype == 0xB:
-                    count, = struct.unpack('<I', file.read(4))
-                self.rgData.append(
-                    PropertySet.get_compact_ids(OSIDs, count)
-                )
+                    (count,) = struct.unpack("<I", file.read(4))
+                self.rgData.append(PropertySet.get_compact_ids(OSIDs, count))
             elif ptype in (0xC, 0xD):
                 count = 1
                 if ptype == 0xD:
-                    count, = struct.unpack('<I', file.read(4))
-                self.rgData.append(
-                    PropertySet.get_compact_ids(ContextIDs, count)
-                )
+                    (count,) = struct.unpack("<I", file.read(4))
+                self.rgData.append(PropertySet.get_compact_ids(ContextIDs, count))
             elif ptype == 0x10:
                 # ArrayOfPropertyValues (MS-ONESTORE section 2.6.9)
-                arr_count, = struct.unpack('<I', file.read(4))
+                (arr_count,) = struct.unpack("<I", file.read(4))
                 child_sets = []
                 if arr_count > 0:
                     # Read prid (must have type 0x11); we validate but
@@ -112,18 +106,18 @@ def _patch_pyonenote() -> None:
                     _arr_prid = PropertyID(file)
                     for _j in range(arr_count):
                         child = PropertySet(
-                            file, OIDs, OSIDs, ContextIDs, document,
+                            file,
+                            OIDs,
+                            OSIDs,
+                            ContextIDs,
+                            document,
                         )
                         child_sets.append(child)
                 self.rgData.append(child_sets)
             elif ptype == 0x11:
-                self.rgData.append(
-                    PropertySet(file, OIDs, OSIDs, ContextIDs, document)
-                )
+                self.rgData.append(PropertySet(file, OIDs, OSIDs, ContextIDs, document))
             else:
-                raise ValueError(
-                    f'rgPrids[{i}].type 0x{ptype:x} is not valid'
-                )
+                raise ValueError(f"rgPrids[{i}].type 0x{ptype:x} is not valid")
 
     PropertySet.__init__ = _patched_init
 
@@ -155,6 +149,7 @@ _REVISION_META = "jcidRevisionMetaData"
 @dataclass
 class ExtractedProperty:
     """A single property from a OneNote object."""
+
     name: str
     value: object  # str, bytes, int, bool, list, etc.
 
@@ -162,6 +157,7 @@ class ExtractedProperty:
 @dataclass
 class ExtractedObject:
     """A parsed object from the OneNote file."""
+
     obj_type: str
     identity: str
     properties: dict[str, object] = field(default_factory=dict)
@@ -170,6 +166,7 @@ class ExtractedObject:
 @dataclass
 class ExtractedPage:
     """A page with its title and content objects."""
+
     title: str = ""
     level: int = 0
     author: str = ""
@@ -181,6 +178,7 @@ class ExtractedPage:
 @dataclass
 class ExtractedSection:
     """All pages extracted from a single .one file."""
+
     file_path: str = ""
     display_name: str = ""
     pages: list[ExtractedPage] = field(default_factory=list)
@@ -240,7 +238,8 @@ class OneStoreParser:
         return section
 
     def _extract_paragraph_styles(
-        self, doc: OneDocment,
+        self,
+        doc: OneDocment,
     ) -> dict[str, str]:
         """Extract paragraph style IDs from ReadOnly object declarations.
 
@@ -297,9 +296,7 @@ class OneStoreParser:
                     return str(name).strip()
         return ""
 
-    def _build_pages(
-        self, objects: list[ExtractedObject]
-    ) -> list[ExtractedPage]:
+    def _build_pages(self, objects: list[ExtractedObject]) -> list[ExtractedPage]:
         """Group objects into pages based on the document structure.
 
         OneNote stores multiple revisions per page, each sharing a GUID.
@@ -334,11 +331,19 @@ class OneStoreParser:
         # No page metadata at all — single unnamed page
         if not page_metas:
             all_content = [
-                o for o in objects
-                if o.obj_type in (
-                    _RICH_TEXT, _IMAGE_NODE, _TABLE_NODE,
-                    _TABLE_ROW, _TABLE_CELL, _EMBEDDED_FILE,
-                    _OUTLINE_ELEMENT, _OUTLINE_NODE, _NUMBER_LIST,
+                o
+                for o in objects
+                if o.obj_type
+                in (
+                    _RICH_TEXT,
+                    _IMAGE_NODE,
+                    _TABLE_NODE,
+                    _TABLE_ROW,
+                    _TABLE_CELL,
+                    _EMBEDDED_FILE,
+                    _OUTLINE_ELEMENT,
+                    _OUTLINE_NODE,
+                    _NUMBER_LIST,
                 )
             ]
             if all_content:
@@ -354,15 +359,20 @@ class OneStoreParser:
 
         # Orphan metas: metadata GUIDs with no page node (old revisions)
         orphan_metas: dict[str, ExtractedObject] = {
-            g: m for g, m in meta_by_guid.items()
-            if g not in page_node_guids
+            g: m for g, m in meta_by_guid.items() if g not in page_node_guids
         }
 
         # Content types we care about
         _CONTENT_TYPES = {
-            _RICH_TEXT, _IMAGE_NODE, _TABLE_NODE,
-            _TABLE_ROW, _TABLE_CELL, _EMBEDDED_FILE,
-            _OUTLINE_ELEMENT, _OUTLINE_NODE, _NUMBER_LIST,
+            _RICH_TEXT,
+            _IMAGE_NODE,
+            _TABLE_NODE,
+            _TABLE_ROW,
+            _TABLE_CELL,
+            _EMBEDDED_FILE,
+            _OUTLINE_ELEMENT,
+            _OUTLINE_NODE,
+            _NUMBER_LIST,
         }
 
         # Build one page per content GUID (GUID that has a PageNode)
@@ -383,25 +393,17 @@ class OneStoreParser:
             level = 0
             creation = ""
             if meta:
-                title = _clean_text(
-                    str(meta.properties.get("CachedTitleString", ""))
-                )
+                title = _clean_text(str(meta.properties.get("CachedTitleString", "")))
                 level = _parse_int(meta.properties.get("PageLevel", 0))
-                creation = str(
-                    meta.properties.get("TopologyCreationTimeStamp", "")
-                )
+                creation = str(meta.properties.get("TopologyCreationTimeStamp", ""))
 
             # Extract author from the page node
             author = ""
             last_modified = ""
             for o in objs:
                 if o.obj_type == _PAGE_NODE:
-                    author = _clean_text(
-                        str(o.properties.get("Author", ""))
-                    )
-                    last_modified = str(
-                        o.properties.get("LastModifiedTime", "")
-                    )
+                    author = _clean_text(str(o.properties.get("Author", "")))
+                    last_modified = str(o.properties.get("LastModifiedTime", ""))
                     break
 
             # Collect content objects for this GUID only

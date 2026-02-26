@@ -1,9 +1,5 @@
 """Tests for onenote_export.cli module."""
 
-from pathlib import Path
-
-import pytest
-
 from onenote_export.cli import _deduplicate_sections
 
 

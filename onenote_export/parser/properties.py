@@ -12,6 +12,7 @@ from enum import IntEnum
 
 class PropertyType(IntEnum):
     """Property data types (bits 26-30 of PropertyID)."""
+
     NO_DATA = 0x01
     BOOL = 0x02
     ONE_BYTE = 0x03
@@ -195,6 +196,7 @@ WEB_PICTURE_CONTAINER_14 = 0x200034C8
 # JCID (object type) constants from MS-ONE Section 2.1.13
 class JCIDType(IntEnum):
     """Object type identifiers."""
+
     READ_ONLY_PERSISTABLE_PROPERTY_CONTAINER_FOR_AUTHOR = 0x00120001
     PERSISTABLE_PROPERTY_CONTAINER_FOR_TOC = 0x00020001
     SECTION_NODE = 0x00060007

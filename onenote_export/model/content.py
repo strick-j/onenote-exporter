@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 @dataclass(frozen=True)
 class TextRun:
     """A run of text with uniform formatting."""
+
     text: str
     bold: bool = False
     italic: bool = False
@@ -21,12 +22,14 @@ class TextRun:
 @dataclass
 class ContentElement:
     """Base class for content elements."""
+
     pass
 
 
 @dataclass
 class RichText(ContentElement):
     """A rich text element containing formatted text runs."""
+
     runs: list[TextRun] = field(default_factory=list)
     indent_level: int = 0
     is_title: bool = False
@@ -38,6 +41,7 @@ class RichText(ContentElement):
 @dataclass
 class ImageElement(ContentElement):
     """An image embedded in the page."""
+
     data: bytes = b""
     filename: str = ""
     alt_text: str = ""
@@ -49,6 +53,7 @@ class ImageElement(ContentElement):
 @dataclass
 class TableElement(ContentElement):
     """A table with rows and cells."""
+
     rows: list[list[list[ContentElement]]] = field(default_factory=list)
     column_widths: list[float] = field(default_factory=list)
     borders_visible: bool = True
@@ -57,6 +62,7 @@ class TableElement(ContentElement):
 @dataclass
 class EmbeddedFile(ContentElement):
     """An embedded file attachment."""
+
     data: bytes = b""
     filename: str = ""
     source_path: str = ""

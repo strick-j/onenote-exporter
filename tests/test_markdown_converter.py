@@ -1,9 +1,5 @@
 """Tests for onenote_export.converter.markdown module."""
 
-from pathlib import Path
-
-import pytest
-
 from onenote_export.converter.markdown import (
     MarkdownConverter,
     _page_filename,
@@ -129,7 +125,11 @@ class TestMarkdownConverterRenderPage:
         page = Page(
             title="Test",
             elements=[
-                RichText(runs=[TextRun(text="click here", hyperlink_url="https://example.com")])
+                RichText(
+                    runs=[
+                        TextRun(text="click here", hyperlink_url="https://example.com")
+                    ]
+                )
             ],
         )
         result = self.converter.render_page(page)
@@ -170,7 +170,9 @@ class TestMarkdownConverterRenderPage:
     def test_page_with_image(self):
         page = Page(
             title="Test",
-            elements=[ImageElement(data=b"\x89PNG", filename="screenshot.png", format="png")],
+            elements=[
+                ImageElement(data=b"\x89PNG", filename="screenshot.png", format="png")
+            ],
         )
         result = self.converter.render_page(page)
         assert "![screenshot.png](./images/screenshot.png)" in result
@@ -214,8 +216,14 @@ class TestMarkdownConverterRenderTable:
     def test_simple_table(self):
         table = TableElement(
             rows=[
-                [[RichText(runs=[TextRun(text="Header 1")])], [RichText(runs=[TextRun(text="Header 2")])]],
-                [[RichText(runs=[TextRun(text="Cell 1")])], [RichText(runs=[TextRun(text="Cell 2")])]],
+                [
+                    [RichText(runs=[TextRun(text="Header 1")])],
+                    [RichText(runs=[TextRun(text="Header 2")])],
+                ],
+                [
+                    [RichText(runs=[TextRun(text="Cell 1")])],
+                    [RichText(runs=[TextRun(text="Cell 2")])],
+                ],
             ]
         )
         result = self.converter._render_table(table)
@@ -237,8 +245,14 @@ class TestMarkdownConverterWriteFiles:
         section = Section(
             name="Test Section",
             pages=[
-                Page(title="Page 1", elements=[RichText(runs=[TextRun(text="Content 1")])]),
-                Page(title="Page 2", elements=[RichText(runs=[TextRun(text="Content 2")])]),
+                Page(
+                    title="Page 1",
+                    elements=[RichText(runs=[TextRun(text="Content 1")])],
+                ),
+                Page(
+                    title="Page 2",
+                    elements=[RichText(runs=[TextRun(text="Content 2")])],
+                ),
             ],
         )
         created = converter.convert_section(section)
@@ -250,7 +264,9 @@ class TestMarkdownConverterWriteFiles:
         converter = MarkdownConverter(tmp_path)
         section = Section(
             name="Test",
-            pages=[Page(title="Hello", elements=[RichText(runs=[TextRun(text="world")])])],
+            pages=[
+                Page(title="Hello", elements=[RichText(runs=[TextRun(text="world")])])
+            ],
         )
         converter.convert_section(section)
         content = (tmp_path / "Test" / "Hello.md").read_text()
@@ -266,7 +282,7 @@ class TestMarkdownConverterWriteFiles:
                 Section(name="Section B", pages=[Page(title="Page 2")]),
             ],
         )
-        created = converter.convert_notebook(notebook)
+        converter.convert_notebook(notebook)
         assert (tmp_path / "My Notebook" / "Section A" / "Page 1.md").exists()
         assert (tmp_path / "My Notebook" / "Section B" / "Page 2.md").exists()
 
@@ -278,7 +294,9 @@ class TestMarkdownConverterWriteFiles:
             pages=[
                 Page(
                     title="With Image",
-                    elements=[ImageElement(data=png_header, filename="pic.png", format="png")],
+                    elements=[
+                        ImageElement(data=png_header, filename="pic.png", format="png")
+                    ],
                 ),
             ],
         )

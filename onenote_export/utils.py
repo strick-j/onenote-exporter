@@ -10,7 +10,8 @@ def discover_one_files(input_dir: Path) -> list[Path]:
     Excludes .onetoc2 table-of-contents files.
     """
     files = sorted(
-        p for p in input_dir.rglob("*.one")
+        p
+        for p in input_dir.rglob("*.one")
         if p.is_file() and not p.name.endswith(".onetoc2")
     )
     return files

@@ -1,7 +1,5 @@
 """Tests for onenote_export.parser.content_extractor module."""
 
-import pytest
-
 from onenote_export.parser.content_extractor import (
     _as_bool,
     _clean_text,
