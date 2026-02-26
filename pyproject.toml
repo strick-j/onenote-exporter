@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "mac-onenote-export"
 version = "0.1.0"
-description = "Export Microsoft OneNote (.one) files to Markdown on macOS"
+description = "Export Microsoft OneNote (.one) files to Markdown"
 requires-python = ">=3.11"
 license = "MIT"
 dependencies = ["pyOneNote>=0.0.2"]

@@ -1,5 +1,7 @@
 """Tests for onenote_export.converter.markdown module."""
 
+import tempfile
+
 from onenote_export.converter.markdown import (
     MarkdownConverter,
     _page_filename,
@@ -68,7 +70,7 @@ class TestMarkdownConverterRenderPage:
     """Tests for MarkdownConverter.render_page."""
 
     def setup_method(self):
-        self.converter = MarkdownConverter("/tmp/test_output")
+        self.converter = MarkdownConverter(tempfile.gettempdir() + "/test_output")
 
     def test_page_with_title(self):
         page = Page(title="My Title")
@@ -211,7 +213,7 @@ class TestMarkdownConverterRenderTable:
     """Tests for table rendering."""
 
     def setup_method(self):
-        self.converter = MarkdownConverter("/tmp/test_output")
+        self.converter = MarkdownConverter(tempfile.gettempdir() + "/test_output")
 
     def test_simple_table(self):
         table = TableElement(

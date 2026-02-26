@@ -5,7 +5,7 @@
 [![Security](https://github.com/strick-j/mac-onenote-export/actions/workflows/security.yml/badge.svg)](https://github.com/strick-j/mac-onenote-export/actions/workflows/security.yml)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org/downloads/)
 
-A command-line tool that exports Microsoft OneNote `.one` files to Markdown on macOS.
+A command-line tool that exports Microsoft OneNote `.one` files to Markdown.
 
 OneNote stores notebooks in a proprietary binary format (MS-ONESTORE). This tool parses those files and converts pages — including text formatting, images, tables, and attachments — into clean, version-control-friendly Markdown.
 
@@ -20,8 +20,8 @@ OneNote stores notebooks in a proprietary binary format (MS-ONESTORE). This tool
 
 ## Requirements
 
-- **macOS**
 - **Python 3.11+**
+- **macOS, Linux, or Windows**
 
 ## Installation
 
@@ -31,7 +31,9 @@ cd mac-onenote-export
 
 # Create and activate a virtual environment (recommended)
 python3 -m venv .venv
-source .venv/bin/activate
+source .venv/bin/activate          # macOS/Linux
+# .venv\Scripts\activate.bat       # Windows (CMD)
+# .venv\Scripts\Activate.ps1       # Windows (PowerShell)
 
 # Install the package
 pip install -e .
@@ -219,7 +221,7 @@ tests/
 - Requires binary `.one` files — does not work with OneNote for Web exports or `.onetoc2` table-of-contents files
 - Some complex OneNote formatting may not have a direct Markdown equivalent
 - OneNote revision history may produce duplicate content in edge cases
-- Designed and tested on macOS
+- Tested on macOS, Linux, and Windows
 
 ## License
 

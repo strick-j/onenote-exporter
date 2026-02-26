@@ -9,3 +9,5 @@ test_output/
 *.egg
 .pytest_cache/
 example/
+Thumbs.db
+desktop.ini
