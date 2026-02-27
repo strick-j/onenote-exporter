@@ -12,7 +12,9 @@ from onenote_export.parser.content_extractor import (
     _looks_garbled,
     _parse_byte_prop_as_int,
     _parse_font_size,
+    _parse_hyperlink_field_codes,
     _parse_int_prop,
+    _reorder_by_outline_hierarchy,
     _section_name_from_path,
 )
 from onenote_export.model.content import RichText, TextRun
@@ -479,3 +481,255 @@ class TestExtractRichText:
         result = _extract_rich_text(obj, {}, None)
         assert result is not None
         assert result.runs[0].text == "World"
+
+    def test_extracts_hyperlink_from_field_code(self):
+        """HYPERLINK field codes should be parsed into url + display text."""
+        obj = ExtractedObject(
+            obj_type="jcidRichTextOENode",
+            identity="1",
+            properties={
+                "RichEditTextUnicode": (
+                    '\uFDDFHYPERLINK "mailto:user@example.com"'
+                    "User Name (Accepted)\x00"
+                ),
+            },
+        )
+        result = _extract_rich_text(obj, {}, None)
+        assert result is not None
+        assert result.runs[0].text == "User Name (Accepted)"
+        assert result.runs[0].hyperlink_url == "mailto:user@example.com"
+
+    def test_extracts_hyperlink_from_https_field_code(self):
+        """HTTPS HYPERLINK field codes should be parsed correctly."""
+        obj = ExtractedObject(
+            obj_type="jcidRichTextOENode",
+            identity="1",
+            properties={
+                "RichEditTextUnicode": (
+                    '\uFDDFHYPERLINK "https://example.com/path"'
+                    "Link to Document\x00"
+                ),
+            },
+        )
+        result = _extract_rich_text(obj, {}, None)
+        assert result is not None
+        assert result.runs[0].text == "Link to Document"
+        assert result.runs[0].hyperlink_url == "https://example.com/path"
+
+
+class TestParseHyperlinkFieldCodes:
+    """Tests for _parse_hyperlink_field_codes."""
+
+    def test_mailto_url(self):
+        text = '\uFDDFHYPERLINK "mailto:user@example.com"User Name\x00'
+        segments = _parse_hyperlink_field_codes(text)
+        assert len(segments) == 1
+        assert segments[0] == ("User Name", "mailto:user@example.com")
+
+    def test_https_url(self):
+        text = '\uFDDFHYPERLINK "https://example.com/path?q=1"Click Here\x00'
+        segments = _parse_hyperlink_field_codes(text)
+        assert len(segments) == 1
+        assert segments[0] == ("Click Here", "https://example.com/path?q=1")
+
+    def test_no_field_code(self):
+        text = "Just regular text"
+        segments = _parse_hyperlink_field_codes(text)
+        assert segments == [("Just regular text", "")]
+
+    def test_alternate_marker_fdf3(self):
+        text = '\uFDF3HYPERLINK "https://example.com"Link Text\x00'
+        segments = _parse_hyperlink_field_codes(text)
+        assert len(segments) == 1
+        assert segments[0] == ("Link Text", "https://example.com")
+
+    def test_display_text_with_parentheses(self):
+        text = '\uFDDFHYPERLINK "mailto:a@b.com"Name (Accepted Meeting)\x00'
+        segments = _parse_hyperlink_field_codes(text)
+        assert segments[0] == ("Name (Accepted Meeting)", "mailto:a@b.com")
+
+    def test_empty_string(self):
+        segments = _parse_hyperlink_field_codes("")
+        assert segments == [("", "")]
+
+    def test_mixed_text_and_field_code(self):
+        """Text with prefix before a field code produces two segments."""
+        text = 'Meeting options | \uFDDFHYPERLINK "https://example.com"Reset PIN'
+        segments = _parse_hyperlink_field_codes(text)
+        assert len(segments) == 2
+        assert segments[0] == ("Meeting options |", "")
+        assert segments[1] == ("Reset PIN", "https://example.com")
+
+    def test_two_field_codes_in_one_text(self):
+        """Two field codes in one text node produce three segments."""
+        text = (
+            'Prefix: \uFDDFHYPERLINK "https://a.com"Link A | '
+            '\uFDDFHYPERLINK "https://b.com"Link B'
+        )
+        segments = _parse_hyperlink_field_codes(text)
+        assert len(segments) == 3
+        assert segments[0] == ("Prefix:", "")
+        assert segments[1] == ("Link A |", "https://a.com")
+        assert segments[2] == ("Link B", "https://b.com")
+
+
+class TestDecodeGarbledUnicode:
+    """Tests for garbled text detection in Unicode encoding path."""
+
+    def test_garbled_unicode_not_mangled(self):
+        """Unicode path should NOT apply garbled re-encoding (preserves real Unicode)."""
+        # Legitimate CJK text should pass through unchanged
+        cjk_text = "\u4f1a\u8b70\u30e1\u30e2"  # 会議メモ (Japanese)
+        result = _decode_text_value(cjk_text, encoding="unicode")
+        assert result == cjk_text
+
+    def test_garbled_ascii_still_fixed(self):
+        """ASCII path should still fix garbled text."""
+        ascii_text = "Hello World Test"
+        garbled = ascii_text.encode("ascii").decode("utf-16-le", errors="replace")
+        assert _looks_garbled(garbled), "Test fixture is not actually garbled"
+        result = _decode_text_value(garbled, encoding="ascii")
+        assert isinstance(result, str)
+
+
+class TestReorderByOutlineHierarchy:
+    """Tests for _reorder_by_outline_hierarchy."""
+
+    def _make_obj(self, obj_type, identity, **props):
+        return ExtractedObject(obj_type=obj_type, identity=identity, properties=props)
+
+    def test_short_list_returned_unchanged(self):
+        """Lists shorter than 4 are returned as-is."""
+        objs = [
+            self._make_obj("jcidRichTextOENode", "1"),
+            self._make_obj("jcidOutlineNode", "2"),
+        ]
+        result = _reorder_by_outline_hierarchy(objs)
+        assert result is objs
+
+    def test_no_outline_nodes_returned_unchanged(self):
+        """Without OutlineNodes, list is returned as-is."""
+        objs = [
+            self._make_obj("jcidOutlineElementNode", "1"),
+            self._make_obj("jcidRichTextOENode", "2"),
+            self._make_obj("jcidOutlineElementNode", "3"),
+            self._make_obj("jcidRichTextOENode", "4"),
+        ]
+        result = _reorder_by_outline_hierarchy(objs)
+        assert result is objs
+
+    def test_no_orphans_returned_unchanged(self):
+        """If no content before the first structural element, return as-is."""
+        objs = [
+            self._make_obj(
+                "jcidOutlineNode", "ON1",
+                ElementChildNodesOfVersionHistory=["OE1"],
+            ),
+            self._make_obj("jcidOutlineElementNode", "OE1"),
+            self._make_obj(
+                "jcidRichTextOENode", "RT1",
+                RichEditTextUnicode="Hello",
+            ),
+            self._make_obj("jcidOutlineElementNode", "OE2"),
+        ]
+        result = _reorder_by_outline_hierarchy(objs)
+        assert result is objs
+
+    def test_orphan_relocated_after_contentless_oe(self):
+        """Orphaned content before first OE should move after its parent OE."""
+        orphan_rt = self._make_obj(
+            "jcidRichTextOENode", "RT-orphan",
+            RichEditTextUnicode="Note 4",
+        )
+        outline_node = self._make_obj(
+            "jcidOutlineNode", "ON1",
+            ElementChildNodesOfVersionHistory=["OE-parent", "OE-child"],
+        )
+        oe_parent = self._make_obj(
+            "jcidOutlineElementNode", "OE-parent",
+            ElementChildNodesOfVersionHistory=["OE-nested"],
+        )
+        rt_parent = self._make_obj(
+            "jcidRichTextOENode", "RT-parent",
+            RichEditTextUnicode="Notes",
+        )
+        # OE-nested is the contentless OE that should receive the orphan
+        oe_nested = self._make_obj("jcidOutlineElementNode", "OE-nested")
+        oe_child = self._make_obj("jcidOutlineElementNode", "OE-child")
+        rt_child = self._make_obj(
+            "jcidRichTextOENode", "RT-child",
+            RichEditTextUnicode="Some text",
+        )
+
+        objects = [
+            orphan_rt,      # [0] orphaned content
+            outline_node,   # [1] OutlineNode
+            oe_nested,      # [2] out-of-place OE (no content)
+            oe_parent,      # [3] OE with content
+            rt_parent,      # [4] content for OE-parent
+            oe_child,       # [5] OE with content
+            rt_child,       # [6] content for OE-child
+        ]
+
+        result = _reorder_by_outline_hierarchy(objects)
+        identities = [obj.identity for obj in result]
+
+        # Orphan should appear after OE-nested, not at the start
+        assert identities[0] != "RT-orphan", "Orphan should not be first"
+        nested_idx = identities.index("OE-nested")
+        orphan_idx = identities.index("RT-orphan")
+        assert orphan_idx == nested_idx + 1, (
+            f"Orphan should follow OE-nested; got order: {identities}"
+        )
+
+    def test_already_correct_order_preserved(self):
+        """Objects in correct hierarchy order should produce identical output."""
+        outline_node = self._make_obj(
+            "jcidOutlineNode", "ON1",
+            ElementChildNodesOfVersionHistory=["OE1", "OE2"],
+        )
+        oe1 = self._make_obj("jcidOutlineElementNode", "OE1")
+        rt1 = self._make_obj(
+            "jcidRichTextOENode", "RT1",
+            RichEditTextUnicode="First",
+        )
+        oe2 = self._make_obj("jcidOutlineElementNode", "OE2")
+        rt2 = self._make_obj(
+            "jcidRichTextOENode", "RT2",
+            RichEditTextUnicode="Second",
+        )
+
+        objects = [outline_node, oe1, rt1, oe2, rt2]
+        # No orphans → returned as-is
+        result = _reorder_by_outline_hierarchy(objects)
+        assert result is objects
+
+    def test_outline_nodes_sorted_by_vert_position(self):
+        """Nodes without vert come first, then ascending vert value."""
+        orphan = self._make_obj(
+            "jcidRichTextOENode", "RT-orphan",
+            RichEditTextUnicode="orphan",
+        )
+        node_no_vert = self._make_obj(
+            "jcidOutlineNode", "ON-title",
+            ElementChildNodesOfVersionHistory=["OE-title"],
+        )
+        oe_title = self._make_obj("jcidOutlineElementNode", "OE-title")
+        rt_title = self._make_obj(
+            "jcidRichTextOENode", "RT-title",
+            RichEditTextUnicode="Title",
+        )
+        node_vert = self._make_obj(
+            "jcidOutlineNode", "ON-body",
+            OffsetFromParentVert=200,
+            ElementChildNodesOfVersionHistory=["OE-body"],
+        )
+        # OE-body has no content → orphan matches here
+        oe_body = self._make_obj("jcidOutlineElementNode", "OE-body")
+
+        objects = [orphan, node_vert, oe_body, node_no_vert, oe_title, rt_title]
+        result = _reorder_by_outline_hierarchy(objects)
+        identities = [obj.identity for obj in result]
+
+        # Title node (no vert) should come before body node (vert=200)
+        assert identities.index("ON-title") < identities.index("ON-body")

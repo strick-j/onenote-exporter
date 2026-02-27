@@ -31,7 +31,7 @@ TEST_DATA = Path(__file__).parent / "test_data"
 NOTEBOOK_DIR = TEST_DATA / "Example-NoteBook-1"
 
 # The file with the table is the latest version of Section 2
-TABLE_FILE = NOTEBOOK_DIR / "Example-Section-2 (On 2-25-26).one"
+TABLE_FILE = NOTEBOOK_DIR / "Example-Section-2 (On 2-27-26).one"
 
 _HAS_TEST_DATA = NOTEBOOK_DIR.exists() and any(NOTEBOOK_DIR.glob("*.one"))
 
@@ -473,8 +473,8 @@ class TestAllTestDataFiles:
     @pytest.mark.parametrize(
         "filename",
         [
-            "Example-Section-1 (On 2-25-26 - 3).one",
-            "Example-Section-2 (On 2-25-26).one",
+            "Example-Section-1 (On 2-27-26).one",
+            "Example-Section-2 (On 2-27-26).one",
         ],
     )
     def test_parse_without_errors(self, filename):
@@ -488,8 +488,8 @@ class TestAllTestDataFiles:
     @pytest.mark.parametrize(
         "filename",
         [
-            "Example-Section-1 (On 2-25-26 - 3).one",
-            "Example-Section-2 (On 2-25-26).one",
+            "Example-Section-1 (On 2-27-26).one",
+            "Example-Section-2 (On 2-27-26).one",
         ],
     )
     def test_extract_without_errors(self, filename):
@@ -502,3 +502,207 @@ class TestAllTestDataFiles:
         assert len(section.pages) >= 1
         for page in section.pages:
             assert page.title
+
+
+# --- Example-Section-3: Collapsible/Outline content with hyperlinks ---
+
+SECTION3_FILE = NOTEBOOK_DIR / "Example-Section-3 (On 2-27-26).one"
+_HAS_SECTION3 = SECTION3_FILE.exists()
+
+
+def _find_latest_section3():
+    """Find the latest version of Example-Section-3."""
+    candidates = sorted(
+        NOTEBOOK_DIR.glob("Example-Section-3*.one"),
+        key=lambda p: p.stat().st_mtime,
+    )
+    return candidates[-1] if candidates else None
+
+
+@pytest.fixture(scope="module")
+def section3_parsed():
+    """Parse the Example-Section-3 .one file (collapsible content)."""
+    path = SECTION3_FILE if SECTION3_FILE.exists() else _find_latest_section3()
+    assert path is not None, "No Example-Section-3 .one file found"
+    parser = OneStoreParser(path)
+    return parser.parse()
+
+
+@pytest.fixture(scope="module")
+def section3_extracted(section3_parsed):
+    """Extract structured content from Example-Section-3."""
+    return extract_section(section3_parsed)
+
+
+@pytest.fixture(scope="module")
+def section3_note1(section3_extracted):
+    """Get Note 1 page from Example-Section-3."""
+    page = next(
+        (p for p in section3_extracted.pages if p.title == "Note 1"),
+        None,
+    )
+    assert page is not None, "Note 1 not found in Example-Section-3"
+    return page
+
+
+@pytest.mark.skipif(not _HAS_SECTION3, reason="Example-Section-3 not available")
+class TestCollapsibleContentHyperlinks:
+    """Verify HYPERLINK field codes in collapsible content are parsed correctly."""
+
+    def test_section_has_pages(self, section3_parsed):
+        assert len(section3_parsed.pages) >= 1
+
+    def test_no_raw_hyperlink_field_codes_in_text(self, section3_note1):
+        """No RichText element should contain raw HYPERLINK field codes."""
+        for elem in section3_note1.elements:
+            if isinstance(elem, RichText):
+                for run in elem.runs:
+                    assert "\uFDDF" not in run.text, (
+                        f"Raw field code marker in text: {run.text!r}"
+                    )
+                    assert "HYPERLINK" not in run.text, (
+                        f"Raw HYPERLINK in text: {run.text!r}"
+                    )
+
+    def test_hyperlinks_have_urls(self, section3_note1):
+        """Elements with field-code hyperlinks should have hyperlink_url set."""
+        links = [
+            (run.text, run.hyperlink_url)
+            for elem in section3_note1.elements
+            if isinstance(elem, RichText)
+            for run in elem.runs
+            if run.hyperlink_url
+        ]
+        assert len(links) >= 1, "Expected at least one hyperlink from field codes"
+        # Verify at least one mailto link exists
+        mailto_links = [u for _, u in links if u.startswith("mailto:")]
+        assert len(mailto_links) >= 1, f"No mailto links found. Links: {links}"
+
+    def test_mailto_links_have_display_names(self, section3_note1):
+        """mailto hyperlinks should have display text (not raw URLs)."""
+        for elem in section3_note1.elements:
+            if isinstance(elem, RichText):
+                for run in elem.runs:
+                    if run.hyperlink_url and run.hyperlink_url.startswith("mailto:"):
+                        assert "mailto:" not in run.text, (
+                            f"Display text contains raw URL: {run.text!r}"
+                        )
+
+    def test_markdown_has_proper_link_syntax(self, section3_note1, tmp_path):
+        """Markdown output should render hyperlinks as [text](url)."""
+        converter = MarkdownConverter(tmp_path)
+        md = converter.render_page(section3_note1)
+        # Should not contain raw field codes
+        assert "\uFDDF" not in md, f"Raw field code in markdown:\n{md}"
+        assert "\uFDF3" not in md, f"Raw field code in markdown:\n{md}"
+        # Should contain proper markdown links
+        link_pattern = re.compile(r"\[.+?\]\(.+?\)")
+        links = link_pattern.findall(md)
+        assert len(links) >= 1, f"No markdown links found in:\n{md}"
+
+
+@pytest.mark.skipif(not _HAS_SECTION3, reason="Example-Section-3 not available")
+class TestCollapsibleContentBullets:
+    """Verify bullet lists in collapsible content are extracted."""
+
+    def test_has_bullet_items(self, section3_note1):
+        """Should have bullet list items from the collapsible content."""
+        bullets = [
+            run.text
+            for elem in section3_note1.elements
+            if isinstance(elem, RichText) and elem.list_type == "unordered"
+            for run in elem.runs
+        ]
+        assert len(bullets) >= 1, "Expected bullet list items in collapsible content"
+
+
+@pytest.mark.skipif(not _HAS_SECTION3, reason="Example-Section-3 not available")
+class TestCollapsibleContentNoGarbledText:
+    """Verify no garbled CJK characters appear in output."""
+
+    def test_no_garbled_text_in_elements(self, section3_note1):
+        """No element text should contain garbled CJK characters."""
+        for elem in section3_note1.elements:
+            if isinstance(elem, RichText):
+                for run in elem.runs:
+                    non_ascii = sum(1 for c in run.text if ord(c) > 0xFF)
+                    if len(run.text) > 2:
+                        ratio = non_ascii / len(run.text)
+                        assert ratio < 0.3, (
+                            f"Garbled text detected ({ratio:.0%} "
+                            f"non-ASCII): {run.text!r}"
+                        )
+
+
+@pytest.mark.skipif(not _HAS_SECTION3, reason="Example-Section-3 not available")
+class TestCollapsibleContentOrdering:
+    """Verify outline hierarchy ordering for recently-edited nested bullets."""
+
+    def _all_texts(self, page):
+        """Return flat list of text strings from all RichText elements."""
+        texts = []
+        for elem in page.elements:
+            if isinstance(elem, RichText):
+                for run in elem.runs:
+                    texts.append(run.text)
+        return texts
+
+    def test_note4_not_first_element(self, section3_note1):
+        """'Note 4' should NOT appear as the first content element."""
+        texts = self._all_texts(section3_note1)
+        assert texts, "No text elements found"
+        assert "Note 4" not in texts[0], (
+            f"'Note 4' should not be first; got: {texts[0]!r}"
+        )
+
+    def test_notes_heading_before_note1_bullet(self, section3_note1):
+        """'Notes' heading should appear before 'Note 1 - Meeting Notes' bullet."""
+        texts = self._all_texts(section3_note1)
+        notes_idx = next(
+            (i for i, t in enumerate(texts) if t.strip() == "Notes"), None
+        )
+        note1_idx = next(
+            (i for i, t in enumerate(texts) if "Note 1 - Meeting" in t), None
+        )
+        assert notes_idx is not None, f"'Notes' not found in: {texts}"
+        assert note1_idx is not None, f"'Note 1 - Meeting' not found in: {texts}"
+        assert notes_idx < note1_idx, (
+            f"'Notes' (idx={notes_idx}) should precede "
+            f"'Note 1 - Meeting' (idx={note1_idx})"
+        )
+
+    def test_note1_bullet_before_note2(self, section3_note1):
+        """'Note 1 - Meeting Notes' bullet should appear before 'Note 2'."""
+        texts = self._all_texts(section3_note1)
+        note1_idx = next(
+            (i for i, t in enumerate(texts) if "Note 1 - Meeting" in t), None
+        )
+        note2_idx = next(
+            (i for i, t in enumerate(texts) if "Note 2" in t), None
+        )
+        assert note1_idx is not None and note2_idx is not None
+        assert note1_idx < note2_idx
+
+    def test_note2_before_note3(self, section3_note1):
+        """'Note 2' should appear before 'Note 3'."""
+        texts = self._all_texts(section3_note1)
+        note2_idx = next(
+            (i for i, t in enumerate(texts) if "Note 2" in t), None
+        )
+        note3_idx = next(
+            (i for i, t in enumerate(texts) if "Note 3" in t), None
+        )
+        assert note2_idx is not None and note3_idx is not None
+        assert note2_idx < note3_idx
+
+    def test_note3_before_note4(self, section3_note1):
+        """'Note 3' should appear before 'Note 4'."""
+        texts = self._all_texts(section3_note1)
+        note3_idx = next(
+            (i for i, t in enumerate(texts) if "Note 3" in t), None
+        )
+        note4_idx = next(
+            (i for i, t in enumerate(texts) if "Note 4" in t), None
+        )
+        assert note3_idx is not None and note4_idx is not None
+        assert note3_idx < note4_idx

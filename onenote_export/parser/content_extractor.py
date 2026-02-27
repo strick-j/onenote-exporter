@@ -50,6 +50,14 @@ _HEADING_STYLE_MAP: dict[str, int] = {
     "h6": 6,
 }
 
+# HYPERLINK field code pattern: OneNote collapsible sections embed
+# hyperlinks as RTF-style field codes with U+FDDF or U+FDF3 marker.
+# Format: <marker>HYPERLINK "url"display_text
+# Display text captures up to (not including) the next field code marker.
+_HYPERLINK_FIELD_RE = re.compile(
+    r"[\uFDDF\uFDF3]HYPERLINK\s+\"([^\"]+)\"([^\uFDDF\uFDF3]+)",
+)
+
 
 def _deduplicate_objects(
     objects: list[ExtractedObject],
@@ -142,6 +150,138 @@ def _object_fingerprint(obj: ExtractedObject) -> str:
         name = str(obj.properties.get("EmbeddedFileName", ""))
         return f"file:{name}" if name else ""
     return ""
+
+
+def _reorder_by_outline_hierarchy(
+    objects: list[ExtractedObject],
+) -> list[ExtractedObject]:
+    """Reorder page objects so content follows its parent OE in hierarchy order.
+
+    OneNote stores recently-edited content earlier in the flat object list
+    than its parent outline structure.  This function walks the outline
+    hierarchy (via ``ElementChildNodesOfVersionHistory``) to reconstruct
+    the correct order.
+
+    When no orphaned content objects are detected (content before the first
+    structural element), the list is returned unchanged.
+    """
+    if len(objects) < 4:
+        return objects
+
+    has_outline = any(obj.obj_type == _OUTLINE_NODE for obj in objects)
+    if not has_outline:
+        return objects
+
+    _BOUNDARY = {_OUTLINE_ELEMENT, _OUTLINE_NODE}
+
+    # Collect orphaned content: content objects before the first structural element.
+    orphans: list[ExtractedObject] = []
+    for obj in objects:
+        if obj.obj_type in _BOUNDARY:
+            break
+        if obj.obj_type in (_RICH_TEXT, _IMAGE_NODE, _EMBEDDED_FILE):
+            orphans.append(obj)
+
+    # If no orphaned content, objects are already in usable order.
+    if not orphans:
+        return objects
+
+    # Build identity → object lookup
+    id_to_obj: dict[str, ExtractedObject] = {}
+    for obj in objects:
+        if obj.identity:
+            id_to_obj[obj.identity] = obj
+
+    # Build OE → content group (non-structural objects following the OE).
+    oe_content: dict[str, list[ExtractedObject]] = {}
+    for i, obj in enumerate(objects):
+        if obj.obj_type != _OUTLINE_ELEMENT:
+            continue
+        group: list[ExtractedObject] = []
+        j = i + 1
+        while j < len(objects):
+            nxt = objects[j]
+            if nxt.obj_type in _BOUNDARY:
+                break
+            group.append(nxt)
+            j += 1
+        oe_content[obj.identity] = group
+
+    visited: set[str] = set()
+    result: list[ExtractedObject] = []
+
+    def _emit(obj: ExtractedObject) -> None:
+        ident = obj.identity
+        if ident and ident in visited:
+            return
+        if ident:
+            visited.add(ident)
+        result.append(obj)
+
+    def _walk_oe(oe_id: str) -> None:
+        if oe_id in visited:
+            return
+        oe_obj = id_to_obj.get(oe_id)
+        if oe_obj is None:
+            return
+
+        _emit(oe_obj)
+
+        group = oe_content.get(oe_id, [])
+        if group:
+            for g in group:
+                _emit(g)
+        elif orphans:
+            _emit(orphans.pop(0))
+
+        child_refs = oe_obj.properties.get(
+            "ElementChildNodesOfVersionHistory", []
+        )
+        if isinstance(child_refs, str):
+            child_refs = [child_refs]
+        if isinstance(child_refs, list):
+            for ref in child_refs:
+                if isinstance(ref, str):
+                    _walk_oe(ref)
+
+    # Process outline nodes sorted by vertical position.
+    # Nodes without OffsetFromParentVert (title/date blocks) come first,
+    # ordered by original index.  Nodes with a vert value follow, sorted
+    # ascending (top-to-bottom on the page).
+    outline_nodes = [
+        (i, obj)
+        for i, obj in enumerate(objects)
+        if obj.obj_type == _OUTLINE_NODE
+    ]
+
+    def _node_sort_key(
+        item: tuple[int, ExtractedObject],
+    ) -> tuple[int, int]:
+        idx, node = item
+        vert = node.properties.get("OffsetFromParentVert")
+        if vert is None:
+            return (0, idx)
+        return (1, _parse_int_prop(vert))
+
+    outline_nodes.sort(key=_node_sort_key)
+
+    for _, node in outline_nodes:
+        _emit(node)
+        child_refs = node.properties.get(
+            "ElementChildNodesOfVersionHistory", []
+        )
+        if isinstance(child_refs, str):
+            child_refs = [child_refs]
+        if isinstance(child_refs, list):
+            for ref in child_refs:
+                if isinstance(ref, str):
+                    _walk_oe(ref)
+
+    # Append remaining unvisited objects in original order.
+    for obj in objects:
+        _emit(obj)
+
+    return result
 
 
 def extract_section(parsed: ExtractedSection) -> Section:
@@ -354,6 +494,10 @@ def _build_page(
     # Remove objects that are exact duplicates (same type + same text content).
     deduped_objects = _deduplicate_objects(extracted.objects)
 
+    # Reorder objects so that recently-edited content appears after
+    # its parent OutlineElement rather than at the top of the list.
+    deduped_objects = _reorder_by_outline_hierarchy(deduped_objects)
+
     # Pre-scan: identify objects that are out-of-line table cell content.
     # These are stored earlier in the list but referenced by a cell's
     # ElementChildNodesOfVersionHistory GUID.  They must be skipped in
@@ -519,8 +663,10 @@ def _extract_rich_text(
     font = _clean_text(str(style.get("Font", "")))
     font_size = _parse_font_size(style.get("FontSize", 0))
 
-    # Check for hyperlink
-    hyperlink_url = _clean_text(str(props.get("WzHyperlinkUrl", "")))
+    # Check for HYPERLINK field codes embedded in the text
+    # (collapsible sections store URLs as field codes in the text itself)
+    has_field_code = "\uFDDF" in text or "\uFDF3" in text
+    wz_hyperlink = _clean_text(str(props.get("WzHyperlinkUrl", "")))
 
     # Check if this is title text
     is_title = _as_bool(props.get("IsTitleText", False))
@@ -528,19 +674,39 @@ def _extract_rich_text(
     # Resolve heading level from ParagraphStyle OSID reference
     heading_level = _resolve_heading_level(props, paragraph_styles)
 
-    # Build text run
-    run = TextRun(
-        text=text,
-        bold=bold,
-        italic=italic,
-        underline=underline,
-        strikethrough=strikethrough,
-        superscript=superscript,
-        subscript=subscript,
-        font=font,
-        font_size=font_size,
-        hyperlink_url=hyperlink_url,
-    )
+    # Build text runs — may produce multiple runs when field codes are mixed
+    # with regular text that has its own WzHyperlinkUrl.
+    runs: list[TextRun] = []
+    if has_field_code:
+        segments = _parse_hyperlink_field_codes(text)
+        for i, (seg_text, seg_url) in enumerate(segments):
+            # First segment without a field-code URL inherits WzHyperlinkUrl
+            url = seg_url if seg_url else (wz_hyperlink if i == 0 else "")
+            runs.append(TextRun(
+                text=seg_text,
+                bold=bold,
+                italic=italic,
+                underline=underline,
+                strikethrough=strikethrough,
+                superscript=superscript,
+                subscript=subscript,
+                font=font,
+                font_size=font_size,
+                hyperlink_url=url,
+            ))
+    else:
+        runs.append(TextRun(
+            text=text,
+            bold=bold,
+            italic=italic,
+            underline=underline,
+            strikethrough=strikethrough,
+            superscript=superscript,
+            subscript=subscript,
+            font=font,
+            font_size=font_size,
+            hyperlink_url=wz_hyperlink,
+        ))
 
     indent_level = 0
     list_type = ""
@@ -549,7 +715,7 @@ def _extract_rich_text(
         list_type = list_info.list_type
 
     return RichText(
-        runs=[run],
+        runs=runs,
         indent_level=indent_level,
         is_title=is_title,
         heading_level=heading_level,
@@ -828,6 +994,8 @@ def _decode_text_value(value: object, encoding: str = "unicode") -> str:
 
         # Check for garbled text: pyOneNote sometimes decodes ASCII bytes
         # as UTF-16LE, producing CJK/symbol characters. Detect and fix this.
+        # Only apply to ASCII path — Unicode text legitimately contains
+        # CJK/Arabic/etc. characters that would be destroyed by re-encoding.
         if encoding == "ascii" and _looks_garbled(cleaned):
             try:
                 raw = cleaned.encode("utf-16-le")
@@ -861,6 +1029,52 @@ def _looks_garbled(text: str) -> bool:
     non_ascii = sum(1 for c in text if ord(c) > 0xFF)
     # If more than 30% of characters are non-ASCII, it's likely garbled
     return len(text) > 2 and non_ascii / len(text) > 0.3
+
+
+def _parse_hyperlink_field_codes(text: str) -> list[tuple[str, str]]:
+    """Parse text that may contain embedded HYPERLINK field codes.
+
+    OneNote collapsible/outline sections embed hyperlinks as RTF-style
+    field codes: U+FDDF HYPERLINK "url" display_text
+
+    Returns a list of (text, url) segments.  Segments without a URL
+    have url="".  Plain text returns ``[(text, "")]``.
+
+    Example with mixed content::
+
+        "Meeting options | \\uFDDFHYPERLINK \\"url\\"Reset PIN"
+        → [("Meeting options |", ""), ("Reset PIN", "url")]
+    """
+    if not text:
+        return [(text, "")]
+
+    segments: list[tuple[str, str]] = []
+    remaining = text
+
+    while remaining:
+        match = _HYPERLINK_FIELD_RE.search(remaining)
+        if not match:
+            cleaned = _clean_text(remaining)
+            if cleaned:
+                segments.append((cleaned, ""))
+            break
+
+        # Text before the field code marker
+        prefix = remaining[: match.start()]
+        prefix_clean = _clean_text(prefix)
+        if prefix_clean:
+            segments.append((prefix_clean, ""))
+
+        url = _clean_text(match.group(1))
+        display = _clean_text(match.group(2))
+        if display:
+            segments.append((display, url))
+        elif url:
+            segments.append((url, url))
+
+        remaining = remaining[match.end() :]
+
+    return segments if segments else [(text, "")]
 
 
 def _section_name_from_path(file_path: str) -> str:
