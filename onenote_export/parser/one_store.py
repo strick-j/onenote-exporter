@@ -50,8 +50,15 @@ def _patch_pyonenote() -> None:
        We wrap the constructor so a terminator node that raises during
        construction is treated as empty (``data = None``, no children);
        the existing fragment-loop break then ends the fragment cleanly.
+
+    4. ``FileNodeList.__init__`` seeks into an empty child reference.
+       MS-ONESTORE defines ``stp=0, cb=0`` as ``fcrZero``.  Treat that
+       reference as an absent child list regardless of which application
+       produced the .one file; all non-empty references retain pyOneNote's
+       original behavior.
     """
     from pyOneNote.FileNode import FileNode as _FileNode
+    from pyOneNote.FileNode import FileNodeList as _FileNodeList
     from pyOneNote.FileNode import ObjectSpaceObjectStreamOfIDs
 
     _original_read = ObjectSpaceObjectStreamOfIDs.read
@@ -139,6 +146,16 @@ def _patch_pyonenote() -> None:
 
     PropertySet.__init__ = _patched_init
 
+    _original_file_node_list_init = _FileNodeList.__init__
+
+    def _patched_file_node_list_init(self, file, document, file_chunk_reference):
+        if file_chunk_reference.stp == 0 and file_chunk_reference.cb == 0:
+            self.end = 0
+            self.fragments = []
+            return
+        _original_file_node_list_init(self, file, document, file_chunk_reference)
+
+    _FileNodeList.__init__ = _patched_file_node_list_init
     _original_filenode_init = _FileNode.__init__
 
     def _patched_filenode_init(self, file, document):
