@@ -199,6 +199,7 @@ class ExtractedObject:
     obj_type: str
     identity: str
     properties: dict[str, object] = field(default_factory=dict)
+    revision_id: str = ""
 
 
 @dataclass
@@ -229,6 +230,9 @@ class OneStoreParser:
 
     def __init__(self, file_path: str | Path) -> None:
         self.file_path = Path(file_path)
+        self._revision_dependencies: dict[str, str] = {}
+        self._active_revisions: dict[tuple[int, str], str] = {}
+        self._revision_contexts: dict[str, set[tuple[int, str]]] = {}
 
     def parse(self) -> ExtractedSection:
         """Parse the .one file and return structured content."""
@@ -241,8 +245,9 @@ class OneStoreParser:
         if doc.header.guidFileType != Header.ONE_UUID:
             raise ValueError(f"{self.file_path} is not a .one file")
 
-        # Get all properties (objects with their property sets)
-        raw_props = doc.get_properties()
+        # Get all properties (objects with their property sets), retaining the
+        # revision attached to each declaration for revision-aware selection.
+        raw_props = self._extract_raw_properties(doc)
 
         # Get embedded files — store by both GUID and identity string
         # so that PictureContainer references (which use identity) can
@@ -262,11 +267,7 @@ class OneStoreParser:
         # Convert raw properties to ExtractedObjects
         all_objects = []
         for raw in raw_props:
-            obj = ExtractedObject(
-                obj_type=raw["type"],
-                identity=raw["identity"],
-                properties=dict(raw["val"]),
-            )
+            obj = ExtractedObject(**raw)
             all_objects.append(obj)
 
         # Build page structure
@@ -274,6 +275,95 @@ class OneStoreParser:
         section.display_name = self._extract_section_name(all_objects)
 
         return section
+
+    def _extract_raw_properties(self, doc: OneDocment) -> list[dict[str, object]]:
+        """Extract declarations and the revision manifest state."""
+        nodes: list[object] = []
+        OneDocment.traverse_nodes(
+            doc.root_file_node_list, nodes, ["ObjectDeclaration2RefCountFND"]
+        )
+        self._extract_revision_state(doc.root_file_node_list)
+
+        result = []
+        for node in nodes:
+            if not hasattr(node, "propertySet"):
+                continue
+            data = node.data
+            result.append(
+                {
+                    "obj_type": str(data.body.jcid),
+                    "identity": str(data.body.oid),
+                    "properties": dict(node.propertySet.body.get_properties()),
+                    "revision_id": _revision_key(
+                        getattr(node.propertySet.body, "current_revision", None)
+                    ),
+                }
+            )
+        return result
+
+    def _extract_revision_state(self, root_file_node_list: object) -> None:
+        """Record revision dependencies and the final role-1 active revisions."""
+        self._revision_dependencies = {}
+        self._active_revisions = {}
+        self._revision_contexts = {}
+        list_index = 0
+
+        def walk(file_node_list: object) -> None:
+            nonlocal list_index
+            current_index = list_index
+            list_index += 1
+            roles: dict[str, str] = {}
+            children = []
+
+            for fragment in getattr(file_node_list, "fragments", []):
+                for node in getattr(fragment, "fileNodes", []):
+                    data = getattr(node, "data", None)
+                    kind = type(data).__name__
+                    if kind in (
+                        "RevisionManifestStart4FND",
+                        "RevisionManifestStart6FND",
+                    ):
+                        rid = _revision_key(data.rid)
+                        context = ""
+                        self._revision_dependencies[rid] = _revision_key(
+                            data.ridDependent
+                        )
+                        self._revision_contexts.setdefault(rid, set()).add(
+                            (current_index, context)
+                        )
+                        if data.RevisionRole == 1:
+                            roles[context] = rid
+                    elif kind == "RevisionManifestStart7FND":
+                        rid = _revision_key(data.base.rid)
+                        context = _revision_key(data.gctxid)
+                        self._revision_dependencies[rid] = _revision_key(
+                            data.base.ridDependent
+                        )
+                        self._revision_contexts.setdefault(rid, set()).add(
+                            (current_index, context)
+                        )
+                        if data.base.RevisionRole == 1:
+                            roles[context] = rid
+                    elif kind in (
+                        "RevisionRoleDeclarationFND",
+                        "RevisionRoleAndContextDeclarationFND",
+                    ):
+                        role_data = data.base if hasattr(data, "base") else data
+                        if role_data.RevisionRole == 1:
+                            context = _revision_key(getattr(data, "gctxid", None))
+                            rid = _revision_key(role_data.rid)
+                            roles[context] = rid
+                            self._revision_contexts.setdefault(rid, set()).add(
+                                (current_index, context)
+                            )
+                    children.extend(getattr(node, "children", []))
+
+            for context, revision in roles.items():
+                self._active_revisions[(current_index, context)] = revision
+            for child in children:
+                walk(child)
+
+        walk(root_file_node_list)
 
     def _extract_paragraph_styles(
         self,
@@ -388,19 +478,14 @@ class OneStoreParser:
                 pages.append(ExtractedPage(objects=all_content))
             return pages
 
-        # Build a lookup: GUID -> page metadata.
-        #
-        # A page's object space contains MULTIPLE metadata revisions.  The
-        # first one encountered in traversal order is the current revision;
-        # later ones are stale copies carrying an outdated PageLevel and/or
-        # title (from before the page was renamed or promoted/demoted to a
-        # subpage).  Keep the first and never overwrite — overwriting with a
-        # stale copy corrupts both the subpage level and the title.
-        meta_by_guid: dict[str, ExtractedObject] = {}
+        # Build a lookup using the declaration nearest each active revision.
+        metas_by_guid: dict[str, list[ExtractedObject]] = {}
         for meta in page_metas:
-            guid = _extract_guid(meta.identity)
-            if guid not in meta_by_guid:
-                meta_by_guid[guid] = meta
+            metas_by_guid.setdefault(_extract_guid(meta.identity), []).append(meta)
+        meta_by_guid = {
+            guid: self._select_revisioned(candidates)
+            for guid, candidates in metas_by_guid.items()
+        }
 
         # Orphan metas: metadata GUIDs with no page node (old revisions)
         orphan_metas: dict[str, ExtractedObject] = {
@@ -439,6 +524,9 @@ class OneStoreParser:
                     del orphan_metas[og]
                     break
 
+            page_nodes = [o for o in objs if o.obj_type == _PAGE_NODE]
+            page_node = self._select_revisioned(page_nodes)
+
             title = ""
             level = 0
             creation = ""
@@ -450,14 +538,40 @@ class OneStoreParser:
             # Extract author from the page node
             author = ""
             last_modified = ""
-            for o in objs:
-                if o.obj_type == _PAGE_NODE:
-                    author = _clean_text(str(o.properties.get("Author", "")))
-                    last_modified = str(o.properties.get("LastModifiedTime", ""))
-                    break
+            if page_node:
+                author = _clean_text(str(page_node.properties.get("Author", "")))
+                last_modified = str(page_node.properties.get("LastModifiedTime", ""))
+                if not title:
+                    title = _clean_text(
+                        str(page_node.properties.get("CachedTitleStringFromPage", ""))
+                    )
 
-            # Collect content objects for this GUID only
+            # The active page node can point to body objects in other GUID groups.
             content = [o for o in objs if o.obj_type in _CONTENT_TYPES]
+            content_guids = {content_guid}
+            child_refs = (
+                page_node.properties.get("ElementChildNodesOfVersionHistory", [])
+                if page_node
+                else []
+            )
+            if not isinstance(child_refs, list):
+                child_refs = [child_refs]
+            for child_ref in child_refs:
+                child_ref = str(child_ref)
+                child_guid = _extract_guid(child_ref) or child_ref
+                if not child_guid or child_guid in content_guids:
+                    continue
+                content_guids.add(child_guid)
+                referenced_objects: dict[tuple[str, str], list[ExtractedObject]] = {}
+                for obj in guid_objects.get(child_guid, []):
+                    if obj.obj_type in _CONTENT_TYPES:
+                        referenced_objects.setdefault(
+                            (obj.obj_type, obj.identity), []
+                        ).append(obj)
+                for candidates in referenced_objects.values():
+                    selected = self._select_revisioned(candidates)
+                    if selected:
+                        content.append(selected)
 
             page = ExtractedPage(
                 title=title or "Untitled",
@@ -472,6 +586,31 @@ class OneStoreParser:
 
         return pages
 
+    def _select_revisioned(
+        self, candidates: list[ExtractedObject]
+    ) -> ExtractedObject | None:
+        """Select the declaration nearest an active revision, if known."""
+        if not candidates:
+            return None
+        active = list(reversed(self._active_revisions.items()))
+        active.sort(key=lambda item: item[0][1] != "")
+        if not active or not any(candidate.revision_id for candidate in candidates):
+            return candidates[0]
+        for context, revision in active:
+            by_revision = {}
+            for candidate in candidates:
+                contexts = self._revision_contexts.get(candidate.revision_id)
+                if contexts and context not in contexts:
+                    continue
+                by_revision.setdefault(candidate.revision_id, candidate)
+            seen = set()
+            while revision and revision not in seen:
+                seen.add(revision)
+                if revision in by_revision:
+                    return by_revision[revision]
+                revision = self._revision_dependencies.get(revision, "")
+        return candidates[0]
+
 
 def _extract_guid(identity_str: str) -> str:
     """Extract the GUID from an ExtendedGUID identity string.
@@ -483,6 +622,13 @@ def _extract_guid(identity_str: str) -> str:
     if match:
         return match.group(1).strip()
     return ""
+
+
+def _revision_key(value: object) -> str:
+    """Return a stable key for pyOneNote ExtendedGUID values."""
+    if value is None:
+        return ""
+    return str(value)
 
 
 def _clean_text(text: str) -> str:
