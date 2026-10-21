@@ -33,7 +33,12 @@ class BaseConverter:
         Returns list of created file paths.
         """
         created: list[Path] = []
-        notebook_dir = self.output_dir / _sanitize_filename(notebook.name)
+        notebook_dir = self.output_dir
+        if notebook.relative_path:
+            for part in Path(notebook.relative_path).parts:
+                notebook_dir /= _sanitize_filename(part)
+        elif notebook.name:
+            notebook_dir /= _sanitize_filename(notebook.name)
 
         for section in notebook.sections:
             files = self.convert_section(section, notebook_dir)

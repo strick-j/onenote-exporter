@@ -11,4 +11,5 @@ class Notebook:
 
     name: str = ""
     dir_path: str = ""
+    relative_path: str = ""
     sections: list[Section] = field(default_factory=list)

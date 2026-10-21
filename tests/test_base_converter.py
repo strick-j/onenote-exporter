@@ -133,6 +133,20 @@ class TestBaseConverterConvertNotebook:
         assert (tmp_path / "My Notebook" / "Section A" / "Page 1.txt").exists()
         assert (tmp_path / "My Notebook" / "Section B" / "Page 2.txt").exists()
 
+    def test_preserves_relative_path(self, tmp_path):
+        converter = _StubConverter(tmp_path)
+        notebook = Notebook(
+            name="Cloud Accounts",
+            relative_path="RIPTiDE A4Me/Cloud Accounts",
+            sections=[Section(name="GCP", pages=[Page(title="Project Notes")])],
+        )
+
+        converter.convert_notebook(notebook)
+
+        assert (
+            tmp_path / "RIPTiDE A4Me" / "Cloud Accounts" / "GCP" / "Project Notes.txt"
+        ).exists()
+
 
 class TestBaseConverterRenderPageAbstract:
     """Test that BaseConverter.render_page raises NotImplementedError."""

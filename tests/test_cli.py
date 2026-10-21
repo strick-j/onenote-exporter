@@ -7,6 +7,7 @@ from unittest.mock import patch, MagicMock
 import pytest
 
 from onenote_export.cli import main, _deduplicate_sections
+from onenote_export.model.section import Section
 
 
 TEST_DATA = Path(__file__).parent / "test_data"
@@ -202,6 +203,38 @@ class TestMainErrorHandling:
                 ]
             )
             assert result in (0, 2)
+
+    def test_preserves_notebook_root_and_nested_group_paths(self, tmp_path):
+        input_dir = tmp_path / "Work Notes"
+        root_section = input_dir / "General.one"
+        nested_section = input_dir / "Engineering" / "Cloud Accounts.one"
+        captured_notebooks = []
+        nested_section.parent.mkdir(parents=True)
+
+        with (
+            patch(
+                "onenote_export.cli.discover_one_files",
+                return_value=[root_section, nested_section],
+            ),
+            patch("onenote_export.cli.OneStoreParser") as parser_cls,
+            patch(
+                "onenote_export.cli.extract_section",
+                side_effect=[Section(), Section()],
+            ),
+            patch("onenote_export.cli.MarkdownConverter") as converter_cls,
+        ):
+            parser_cls.return_value.parse.return_value = object()
+            converter_cls.return_value.convert_notebook.side_effect = lambda notebook: (
+                captured_notebooks.append(notebook) or []
+            )
+
+            result = main(["-i", str(input_dir), "-o", str(tmp_path / "out")])
+
+        assert result == 0
+        assert [notebook.relative_path for notebook in captured_notebooks] == [
+            "Work Notes",
+            "Work Notes/Engineering",
+        ]
 
 
 class TestFormatArgument:

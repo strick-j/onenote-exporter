@@ -119,6 +119,7 @@ def main(argv: list[str] | None = None) -> int:
         notebook = Notebook(
             name=notebook_name,
             dir_path=str(notebook_dir),
+            relative_path=str(notebook_dir.relative_to(input_dir.parent)),
         )
 
         for section_file in sorted(section_files):
