@@ -7,12 +7,13 @@ and organizes it by page.
 import logging
 import re
 import struct
+import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from pyOneNote.FileNode import ObjectSpaceObjectPropSet, PropertyID, PropertySet
 from pyOneNote.Header import Header
 from pyOneNote.OneDocument import OneDocment
-from pyOneNote.FileNode import PropertyID, PropertySet, ObjectSpaceObjectPropSet
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +53,10 @@ def _patch_pyonenote() -> None:
        the existing fragment-loop break then ends the fragment cleanly.
     """
     from pyOneNote.FileNode import FileNode as _FileNode
-    from pyOneNote.FileNode import ObjectSpaceObjectStreamOfIDs
+    from pyOneNote.FileNode import (
+        ObjectSpaceObjectStreamOfIDs,
+        PrtFourBytesOfLengthFollowedByData,
+    )
 
     _original_read = ObjectSpaceObjectStreamOfIDs.read
 
@@ -138,6 +142,73 @@ def _patch_pyonenote() -> None:
                 raise ValueError(f"rgPrids[{i}].type 0x{ptype:x} is not valid")
 
     PropertySet.__init__ = _patched_init
+
+    def _patched_get_properties(self):
+        if self._formated_properties is not None:
+            return self._formated_properties
+
+        self._formated_properties = {}
+        for i in range(self.cProperties):
+            property_name = str(self.rgPrids[i])
+            if property_name == "Unknown":
+                continue
+
+            raw_value = self.rgData[i]
+            property_value = ""
+            if isinstance(raw_value, PrtFourBytesOfLengthFollowedByData):
+                if "guid" in property_name.lower():
+                    property_value = uuid.UUID(bytes_le=raw_value.Data).hex
+                else:
+                    try:
+                        property_value = raw_value.Data.decode("utf-16")
+                    except UnicodeError:
+                        property_value = raw_value.Data.hex()
+            elif getattr(self.rgPrids[i], "type", None) == 0x02 or isinstance(
+                raw_value, bool
+            ):
+                property_value = str(raw_value)
+            else:
+                property_name_lower = property_name.lower()
+                if "time" in property_name_lower:
+                    if isinstance(raw_value, (bytes, bytearray, memoryview)):
+                        if len(raw_value) == 8:
+                            (timestamp_in_nano,) = struct.unpack("<Q", raw_value)
+                            property_value = str(
+                                PropertySet.parse_filetime(timestamp_in_nano)
+                            )
+                        elif len(raw_value) == 4:
+                            (timestamp_in_sec,) = struct.unpack("<I", raw_value)
+                            property_value = str(
+                                PropertySet.time32_to_datetime(timestamp_in_sec)
+                            )
+                        else:
+                            property_value = bytes(raw_value).hex()
+                    else:
+                        property_value = str(raw_value)
+                elif (
+                    "height" in property_name_lower
+                    or "width" in property_name_lower
+                    or "offset" in property_name_lower
+                    or "margin" in property_name_lower
+                ):
+                    (size,) = struct.unpack("<f", raw_value)
+                    property_value = PropertySet.half_inch_size_to_pixels(size)
+                elif "langid" in property_name_lower:
+                    (lcid,) = struct.unpack("<H", raw_value)
+                    property_value = f"{PropertySet.lcid_to_string(lcid)}({lcid})"
+                elif "languageid" in property_name_lower:
+                    (lcid,) = struct.unpack("<I", raw_value)
+                    property_value = f"{PropertySet.lcid_to_string(lcid)}({lcid})"
+                else:
+                    if isinstance(raw_value, list):
+                        property_value = [str(item) for item in raw_value]
+                    else:
+                        property_value = str(raw_value)
+
+            self._formated_properties[property_name] = property_value
+        return self._formated_properties
+
+    PropertySet.get_properties = _patched_get_properties
 
     _original_filenode_init = _FileNode.__init__
 
